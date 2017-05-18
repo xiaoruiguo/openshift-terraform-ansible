@@ -1,4 +1,5 @@
 variable "openstack_user_name" {}
+variable "openstack_domain_name" {}
 variable "openstack_tenant_name" {}
 variable "openstack_tenant_id" {}
 variable "openstack_password" {}
@@ -20,6 +21,7 @@ provider "openstack" {
     password  = "${var.openstack_password}"
     auth_url  = "${var.openstack_auth_url}"
     endpoint_type = "public"
+    domain_name = "${var.openstack_domain_name}"
 }
 
 resource "openstack_compute_secgroup_v2" "os3-sec-group" {
@@ -108,24 +110,24 @@ resource "openstack_compute_secgroup_v2" "os3-sec-group" {
 
 resource "openstack_compute_floatingip_v2" "os3-master-floatip" {
   region = "${var.openstack_region}"
-  pool = "os1_public"
+  pool = "public"
 }
 
 resource "openstack_compute_floatingip_v2" "os3-node-floatip" {
   count = "${var.num_nodes}"
   region = "${var.openstack_region}"
-  pool = "os1_public"
+  pool = "public"
 }
 
 
-resource "openstack_blockstorage_volume_v1" "master-docker-vol" {
+resource "openstack_blockstorage_volume_v2" "master-docker-vol" {
   name = "mastervol"
   size = 75
 }
 
-resource "openstack_blockstorage_volume_v1" "node-docker-vol" {
+resource "openstack_blockstorage_volume_v2" "node-docker-vol" {
   count = "${var.num_nodes}"
-  name = "${concat("node-docker-vol", count.index)}"
+  name = "node-docker-vol${count.index}"
   size = 75
 }
 
@@ -137,30 +139,44 @@ resource "openstack_compute_instance_v2" "ose-master" {
   availability_zone = "${var.openstack_availability_zone}"
   key_pair = "${var.openstack_keypair}"
   security_groups = ["default", "os3-sec-group"]
+  user_data ="sed -i '$a proxy=http://opscloud:cloud0518@10.53.13.245:3128/' /etc/yum.conf"
   floating_ip = "${openstack_compute_floatingip_v2.os3-master-floatip.address}"
+
   metadata {
     ssh_user = "cloud-user"
   }
+
+  network {
+    name = "tenant"
+  } 
+
   volume {
-    volume_id = "${openstack_blockstorage_volume_v1.master-docker-vol.id}"
+    volume_id = "${openstack_blockstorage_volume_v2.master-docker-vol.id}"
   }
 }
 
 resource "openstack_compute_instance_v2" "ose-node" {
   count = "${var.num_nodes}"
-  name = "${concat("os3-node", count.index)}"
+  name = "os3-node${count.index}"
   region = "${var.openstack_region}"
   image_id = "${var.node_image_id}"
   flavor_name = "${var.node_instance_size}"
   availability_zone = "${var.openstack_availability_zone}"
   key_pair = "${var.openstack_keypair}"
   security_groups = ["default", "os3-sec-group"]
+  user_data ="sed -i '$a proxy=http://opscloud:cloud0518@10.53.13.245:3128/' /etc/yum.conf"
   floating_ip = "${element(openstack_compute_floatingip_v2.os3-node-floatip.*.address, count.index)}"
+
   metadata {
     ssh_user = "cloud-user"
   }
+
+  network {
+    name = "tenant"
+  }
+
   volume {
-    volume_id = "${element(openstack_blockstorage_volume_v1.node-docker-vol.*.id, count.index)}"
+    volume_id = "${element(openstack_blockstorage_volume_v2.node-docker-vol.*.id, count.index)}"
 
   }
 }
